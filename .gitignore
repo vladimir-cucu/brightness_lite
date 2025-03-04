@@ -1,0 +1,5 @@
+include/ini.o
+brightness_lite.elf
+brightness_lite.ini
+brightness_lite.prx
+main.o
