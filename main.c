@@ -21,7 +21,7 @@ PSP_MAIN_THREAD_ATTR(0);
 int BRIGHTNESS_PRESET[4] = {20, 40, 60, 80};
 
 typedef struct {
-    int brightness[BRIGHTNESS_COUNT];
+    int preset[BRIGHTNESS_COUNT];
 } configuration;
 
 static int handler(void* config, const char* section, const char* name,
@@ -29,14 +29,18 @@ static int handler(void* config, const char* section, const char* name,
     configuration* pconfig = (configuration*)config;
 
 #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
-    if (MATCH(BRIGHTNESS, "preset_1")) {
-        pconfig->brightness[0] = atoi(value);
-    } else if (MATCH(BRIGHTNESS, "preset_2")) {
-        pconfig->brightness[1] = atoi(value);
-    } else if (MATCH(BRIGHTNESS, "preset_3")) {
-        pconfig->brightness[2] = atoi(value);
-    } else if (MATCH(BRIGHTNESS, "preset_4")) {
-        pconfig->brightness[3] = atoi(value);
+    if (MATCH(BRIGHTNESS, "preset")) {
+        char* token;
+        char value_copy[256];
+        strncpy(value_copy, value, sizeof(value_copy) - 1);
+        value_copy[sizeof(value_copy) - 1] = '\0';
+        int index = 0;
+        token = strtok(value_copy, ",");
+        while (token != NULL && index < BRIGHTNESS_COUNT) {
+            pconfig->preset[index] = atoi(token);
+            index++;
+            token = strtok(NULL, ",");
+        }
     } else {
         return 0;
     }
@@ -49,14 +53,12 @@ void brightness_presets_initialization() {
         ini_parse(PLUGIN_INI_PATH_GO, handler, &config) < 0) {
         return;
     }
-    if (0 < config.brightness[0] &&
-        config.brightness[0] < config.brightness[1] &&
-        config.brightness[1] < config.brightness[2] &&
-        config.brightness[2] < config.brightness[3] &&
-        config.brightness[3] <= 100) {
+    if (0 < config.preset[0] && config.preset[0] < config.preset[1] &&
+        config.preset[1] < config.preset[2] &&
+        config.preset[2] < config.preset[3] && config.preset[3] <= 100) {
         int i;
         for (i = 0; i < BRIGHTNESS_COUNT; i++) {
-            BRIGHTNESS_PRESET[i] = config.brightness[i];
+            BRIGHTNESS_PRESET[i] = config.preset[i];
         }
     }
 }
