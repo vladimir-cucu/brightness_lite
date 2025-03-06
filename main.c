@@ -13,20 +13,20 @@
 #define PLUGIN_INI_PATH "ms0:/SEPLUGINS/brightness_lite.ini"
 #define PLUGIN_INI_PATH_GO "ef0:/SEPLUGINS/brightness_lite.ini"
 #define BRIGHTNESS "brightness"
-#define BRIGHTNESS_COUNT 4
+#define DEFAULT_BRIGHTNESS_PRESETS_COUNT 4
+const int DEFAULT_BRIGHTNESS_PRESET[4] = {20, 40, 60, 80};
+#define MAX_BRIGHTNESS_PRESETS_COUNT 10
 
 PSP_MODULE_INFO(PLUGIN_NAME, 0x1000, 1, 0);
 PSP_MAIN_THREAD_ATTR(0);
 
-int BRIGHTNESS_PRESET[4] = {20, 40, 60, 80};
-
 typedef struct {
-    int preset[BRIGHTNESS_COUNT];
+    int count;
+    int preset[MAX_BRIGHTNESS_PRESETS_COUNT];
 } configuration;
 
-static int handler(void* config, const char* section, const char* name,
-                   const char* value) {
-    configuration* pconfig = (configuration*)config;
+static int handler(void* config, const char* section, const char* name, const char* value) {
+    configuration* brightness = (configuration*)config;
 
 #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
     if (MATCH(BRIGHTNESS, "preset")) {
@@ -34,38 +34,45 @@ static int handler(void* config, const char* section, const char* name,
         char value_copy[256];
         strncpy(value_copy, value, sizeof(value_copy) - 1);
         value_copy[sizeof(value_copy) - 1] = '\0';
-        int index = 0;
+        int count = 0;
         token = strtok(value_copy, ",");
-        while (token != NULL && index < BRIGHTNESS_COUNT) {
-            pconfig->preset[index] = atoi(token);
-            index++;
+        while (token != NULL && count < MAX_BRIGHTNESS_PRESETS_COUNT) {
+            brightness->preset[count] = atoi(token);
+            count++;
             token = strtok(NULL, ",");
         }
+        brightness->count = count;
     } else {
         return 0;
     }
     return 1;
 }
 
-void brightness_presets_initialization() {
-    configuration config;
-    if (ini_parse(PLUGIN_INI_PATH, handler, &config) < 0 &&
-        ini_parse(PLUGIN_INI_PATH_GO, handler, &config) < 0) {
-        return;
+void brightness_presets_initialization(configuration* brightness) {
+    int use_default_presets = 0, i;
+    if (ini_parse(PLUGIN_INI_PATH, handler, brightness) < 0 && ini_parse(PLUGIN_INI_PATH_GO, handler, brightness) < 0) {
+        use_default_presets = 1;
+    } else if (0 >= brightness->preset[0] && brightness->preset[brightness->count - 1] > 100) {
+        use_default_presets = 1;
+    } else {
+        for (i = 0; i < brightness->count - 1; i++) {
+            if (brightness->preset[i] >= brightness->preset[i + 1]) {
+                use_default_presets = 1;
+                break;
+            }
+        }
     }
-    if (0 < config.preset[0] && config.preset[0] < config.preset[1] &&
-        config.preset[1] < config.preset[2] &&
-        config.preset[2] < config.preset[3] && config.preset[3] <= 100) {
-        int i;
-        for (i = 0; i < BRIGHTNESS_COUNT; i++) {
-            BRIGHTNESS_PRESET[i] = config.preset[i];
+    if (use_default_presets) {
+        brightness->count = DEFAULT_BRIGHTNESS_PRESETS_COUNT;
+        for (i = 0; i < DEFAULT_BRIGHTNESS_PRESETS_COUNT; i++) {
+            brightness->preset[i] = DEFAULT_BRIGHTNESS_PRESET[i];
         }
     }
 }
 
-void set_brightness_level(int brightness_level) {
+void set_brightness_level(int brightness_level, configuration brightness) {
     sceDisplayWaitVblankStart();
-    sceDisplaySetBrightness(BRIGHTNESS_PRESET[brightness_level], 0);
+    sceDisplaySetBrightness(brightness.preset[brightness_level], 0);
 }
 
 void read_latch_data(SceCtrlLatch* latch_data) {
@@ -74,11 +81,12 @@ void read_latch_data(SceCtrlLatch* latch_data) {
 }
 
 int main_thread(SceSize argc, void* argp) {
-    int brightness_level = sceImposeGetParam(PSP_IMPOSE_BACKLIGHT_BRIGHTNESS),
-        is_screen_on = 1;
-    set_brightness_level(brightness_level);
-
+    configuration brightness;
+    int brightness_level = sceImposeGetParam(PSP_IMPOSE_BACKLIGHT_BRIGHTNESS), is_screen_on = 1;
     SceCtrlLatch latch_data;
+
+    brightness_presets_initialization(&brightness);
+    set_brightness_level(brightness_level, brightness);
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_DIGITAL);
 
@@ -87,12 +95,12 @@ int main_thread(SceSize argc, void* argp) {
         if (is_screen_on && (latch_data.uiBreak & PSP_CTRL_SCREEN)) {
             sceDisplayGetBrightness(&is_screen_on, 0);
             if (is_screen_on) {
-                brightness_level = (brightness_level + 1) % BRIGHTNESS_COUNT;
-                set_brightness_level(brightness_level);
+                brightness_level = (brightness_level + 1) % brightness.count;
+                set_brightness_level(brightness_level, brightness);
             }
         } else if (!is_screen_on && (latch_data.uiMake & PSP_CTRL_SCREEN)) {
             is_screen_on = 1;
-            set_brightness_level(brightness_level);
+            set_brightness_level(brightness_level, brightness);
             while (1) {
                 read_latch_data(&latch_data);
                 if (latch_data.uiBreak & PSP_CTRL_SCREEN) {
@@ -107,9 +115,7 @@ int main_thread(SceSize argc, void* argp) {
 }
 
 int module_start(SceSize args, void* argp) {
-    brightness_presets_initialization();
-    int thid =
-        sceKernelCreateThread(PLUGIN_NAME, main_thread, 0x7E, 0x1000, 0, NULL);
+    int thid = sceKernelCreateThread(PLUGIN_NAME, main_thread, 0x7E, 0x1000, 0, NULL);
     if (thid >= 0) {
         sceKernelStartThread(thid, args, argp);
     }
